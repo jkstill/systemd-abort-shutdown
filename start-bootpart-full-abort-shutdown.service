@@ -1,0 +1,9 @@
+[Unit]
+Description=Start /boot partition full protection - cannot reboot if disk is full
+
+[Service]
+ExecStart=/bin/sh -c '/bin/systemctl enable bootpart-full-abort-shutdown; /bin/systemctl start bootpart-full-abort-shutdown'
+
+[Install]
+WantedBy=multi-user.target
+

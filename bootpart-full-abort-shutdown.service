@@ -1,0 +1,16 @@
+[Unit]
+Description=Cancel shutdowns and reboots when /boot has insufficient free space
+Requires=multi-user.target
+Before=shutdown.target reboot.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+ExecStart=/usr/local/bin/check-boot-space.sh
+TimeoutStartSec=10
+
+[Install]
+RequiredBy=shutdown.target reboot.target
+
+
