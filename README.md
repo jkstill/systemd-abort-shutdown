@@ -429,6 +429,7 @@ shutdown.target
 ## References
 
 [Managing Services with Systemd Unit Files](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/system_administrators_guide/sect-managing_services_with_systemd-unit_files)
+
 [Managing Services with Sytemd Targets](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/system_administrators_guide/sect-Managing_Services_with_systemd-Targets)
 
 
