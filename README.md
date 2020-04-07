@@ -12,15 +12,17 @@ In this case the conditions are:
 - insuffcient space /boot 
 - insufficient inodes in /boot
 
-If /boot is full, a reboot will fail
+If /boot is full, a reboot will fail, as there must be some free space in /boot.
 
 If /boot is near full, a reboot may fail.
 
-This will not work if any of the following are used
+The solution provided here will prevent the following commands from working at all, as long as the service described is running:
 
 - reboot
 - shutdown now
 - shutdown +0
+
+As you will see, other forms of the shutdown command will succeed, provided the service (as you will soon see) allows it
 
 This article is useful for RedHat Linux 7+ and variants, such as Oracle Linux.
 
@@ -91,7 +93,7 @@ And so the reboot was cancelled.
 The reboot can be forced by disabling the service:
 
 ```text
-ot@ora75-mule system]# systemctl disable  bootpart-full-abort-shutdown.service
+[root@ora75-mule system]# systemctl disable  bootpart-full-abort-shutdown.service
 Removed symlink /etc/systemd/system/shutdown.target.requires/bootpart-full-abort-shutdown.service.
 Removed symlink /etc/systemd/system/reboot.target.requires/bootpart-full-abort-shutdown.service.
 
@@ -290,7 +292,7 @@ chmod 664 /etc/systemd/system/start-bootpart-full-abort-shutdown.service
 ```
 
 
-## Enable the service
+## Enable and Start the service
 
 ```text
 [root@ora75-mule ~]# systemctl status bootpart-full-abort-shutdown.service
@@ -301,6 +303,21 @@ chmod 664 /etc/systemd/system/start-bootpart-full-abort-shutdown.service
 [root@ora75-mule ~]# systemctl enable bootpart-full-abort-shutdown.service
 Created symlink from /etc/systemd/system/poweroff.target.wants/bootpart-full-abort-shutdown.service to /etc/systemd/system/bootpart-full-abort-shutdown.service.
 Created symlink from /etc/systemd/system/halt.target.wants/bootpart-full-abort-shutdown.service to /etc/systemd/system/bootpart-full-abort-shutdown.service.
+
+[root@ora75-mule ~]# systemctl start  bootpart-full-abort-shutdown.service
+
+[root@ora75-mule ~]# systemctl status  bootpart-full-abort-shutdown.service
+● bootpart-full-abort-shutdown.service - Cancel shutdowns and reboots when /boot has insufficient free space
+   Loaded: loaded (/etc/systemd/system/bootpart-full-abort-shutdown.service; enabled; vendor preset: disabled)
+   Active: active (running) since Mon 2020-04-06 20:59:58 EDT; 2s ago
+ Main PID: 4194 (bash)
+   CGroup: /system.slice/bootpart-full-abort-shutdown.service
+           ├─4194 bash /usr/local/bin/check-boot-space.sh
+           └─4195 sleep 5
+
+Apr 06 20:59:58 ora75-mule.jks.com systemd[1]: Started Cancel shutdowns and reboots when /boot has insufficient free space.
+Apr 06 20:59:58 ora75-mule.jks.com systemd[1]: Starting Cancel shutdowns and reboots when /boot has insufficient free space...
+
 ```
 
 ## Show Dependencies
@@ -326,7 +343,7 @@ shutdown.target
 
 ## Test the service
 
-With these values at 15%, the `check-boot-space.sh` script that is run by the `bootpart-full-abort-shutdown.service` service will prevent the reboot.
+With the threshold values at 15%, the `check-boot-space.sh` script that is run by the `bootpart-full-abort-shutdown.service` service will prevent the reboot.
 
 ```
 [root@ora75-mule ~]# grep 'declare max' /usr/local/bin/check-boot-space.sh
