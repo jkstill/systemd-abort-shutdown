@@ -75,6 +75,24 @@ my @runDirs= (
 
 my $runFile='reboot-abort.conf';
 
+# service used to setup when booted
+my %service = ();
+
+$service{dir} = '/etc/systemd/system';
+$service{name} = 'set-reboot-abort.service';
+$service{text} = q{
+
+[Unit]
+Description=Start /boot partition full protection - cannot reboot if disk is full
+
+[Service]
+ExecStart=/root/bin/reboot-abort.pl --reject
+
+[Install]
+WantedBy=multi-user.target
+
+};
+
 # the contents of the runFile
 my %directives = ();
 
@@ -123,7 +141,7 @@ print qq{
 if (! checkUsers($username,\@allowedUsers)) {
 	die "user $username not allowed to reboot\n";
 } else {
-	print "user $username is allowed to reboot\n" if $debug;
+	pdebug("user $username is allowed to reboot");
 }
 
 
@@ -134,7 +152,7 @@ if ($rebootCmd and ! validateCmd("$rebootCmd") ) {
 
 
 if ($allowReboot) {
-	print "configuring to allow reboot\n" if $debug;
+	 pdebug("configuring to allow reboot");
 	allow();
 	exit;
 } elsif ($rejectReboot) {
@@ -148,6 +166,9 @@ if ($allowReboot) {
 } elsif ($installReboot) {
 	install();
 	exit;
+} elsif ($eraseReboot) {
+	remove();
+	exit;
 } else {
 	print "Unknown State\n";
 	exit 44;
@@ -159,9 +180,15 @@ if ($allowReboot) {
 ############################
 
 
+sub pdebug {
+
+	print join(' ', @_) . "\n" if $debug;
+	return;
+}
+
 sub createDirs {
 	foreach my $dir ( @runDirs ) {
-		print "mkdir: $dir\n" if $debug;
+		pdebug("mkdir: $dir");
 		eval {
 			make_path($dir);
 		};
@@ -173,14 +200,22 @@ sub writeDirective {
 	# must be 'allow' or 'reject'
 	my $directive = shift;
 	die "directive of $directive is invalid\n" unless $directive =~ /^(allow|reject)$/;
-	print "inside writeDirective()\n" if $debug;
-	print Dumper(\@runDirs) if $debug;
+	pdebug("inside writeDirective()");
+	pdebug( '@runDirs: ', Dumper(\@runDirs));
 	foreach my $dir ( @runDirs ) {
 		my $fh = IO::File->new;
 		my $outFile="${dir}/${runFile}";
-		print "outFile: $outFile\n" if $debug;
+		pdebug("outFile: $outFile");
 		$fh->open($outFile,'>') or die "could not open $outFile - $!\n";
 		$fh->print($directives{$directive});
+	}
+}
+
+sub removeDirectives {
+	foreach my $dir ( @runDirs ) {
+		my $filename="${dir}/${runFile}";
+		pdebug("filename $filename");
+		unlink ($filename);
 	}
 }
 
@@ -190,7 +225,7 @@ sub reject {
 }
 
 sub allow {
-	print "inside allow()\n" if $debug;
+	pdebug("inside allow()");
 	createDirs();
 	writeDirective('allow');
 }
@@ -207,11 +242,11 @@ sub getChecks {
 	my @rawLines = <$fh>;
 	chomp @rawLines;
 
-	print '@rawLines ' . Dumper(\@rawLines) if $debug;
+	pdebug('@rawLines ' . Dumper(\@rawLines));
 
 	my @lines=grep(/^check:/,@rawLines);
 
-	print '@lines ' . Dumper(\@lines) if $debug;
+	pdebug('@lines ' . Dumper(\@lines));
 
 	my @checks=();;
 	foreach my $line (@lines) {
@@ -219,7 +254,7 @@ sub getChecks {
 		push @checks, $check;
 	}
 
-	print '@checks: ' . Dumper(\@checks) if $debug;
+	pdebug('@checks: ' . Dumper(\@checks));
 
 	return @checks;
 
@@ -230,7 +265,7 @@ sub reboot {
 	my ($checksArrayRef,$rebootCmd) = @_;
 
 	foreach my $chkCmd (@{$checksArrayRef}) {
-		print "reboot:chkCmd: $chkCmd\n" if $debug;
+		pdebug("reboot:chkCmd: $chkCmd");
 		my $result = system($chkCmd);
 		# remember - shell returns non-zero for success
 		if ( $result ) {
@@ -288,33 +323,57 @@ sub checkUsers {
 }
 
 
-# service used to setup when booted
-my %service = ();
 
-$service{dir} = '/etc/systemd/system';
-$service{name} = 'set-reboot-abort.service';
-$service{text} = q{
+sub createService {
 
-[Unit]
-Description=Start /boot partition full protection - cannot reboot if disk is full
+	my $serviceFile = qq{${service{dir}}/${service{name}}};	
+	if (-f $serviceFile ) {
+		warn "cowardly refusing to overwrite: $serviceFile\n";
+		return;
+	}
 
-[Service]
-ExecStart=/root/bin/reboot-abort.pl --reject
+	my $fh = IO::File->new;
+	$fh->open($serviceFile,'>') or die "could not create $serviceFile - $!\n";
+	print $fh $service{text};
+	$fh->close;
 
-[Install]
-WantedBy=multi-user.target
+	chmod 0664, $serviceFile;
 
-};
+	system("/usr/bin/systemctl enable $service{name}"); # or die "failed to start service $service{name} - $!\n";
+	return;
+}
 
+sub removeService {
+
+	my $serviceFile = qq{${service{dir}}/${service{name}}};	
+
+	chmod 0664, $serviceFile;
+
+	system("/usr/bin/systemctl disable $service{name}"); # or die "failed to disable service $service{name} - $!\n";
+	unlink ($serviceFile);
+	return;
+
+}
 
 sub getCheckScript {
 	my $checkBootFile = "${rootBin}/${chkBootScript}";
+	if (-f $checkBootFile ) {
+		warn "cowardly refusing to overwrite: $checkBootFile\n";
+		return;
+	}
 	my $fh = IO::File->new;
 	$fh->open($checkBootFile,'>') or die "could not create $checkBootFile - $!\n";
 	while (<DATA>) {
 		print $fh $_;
 	}
+	$fh->close;
 	chmod 0750, $checkBootFile;
+}
+
+sub removeCheckScript {
+	my $checkBootFile = "${rootBin}/${chkBootScript}";
+	unlink ($checkBootFile);
+	return;
 }
 
 sub createConfig {
@@ -334,17 +393,32 @@ sub createConfig {
 }
 
 sub removeConfig {
+	unlink $fpConfigFile;
+	pdebug("removeConfig: removing $fpConfigFile");
+	my $fpConfigDir=qq[${homeDir}/${configDir}];
+	rmdir $fpConfigDir;
+	return;
 }
 
 sub install  {
-	print "\ninstall: calling getCheckScript\n" if $debug;
+	pdebug("\ninstall: calling getCheckScript");
 	getCheckScript();
-	print "\ninstall: calling createConfig\n" if $debug;
+	pdebug("\ninstall: calling createConfig");
 	createConfig();
+	pdebug("\ninstall: calling createService");
+	createService();
 }
 
 
 sub remove {
+	pdebug("\nremove: calling removeCheckScript");
+	removeCheckScript();
+	pdebug("\nremove: calling removeConfig");
+	removeConfig();
+	pdebug("\nremove: calling removeService");
+	removeService();
+	pdebug("\nremove: calling removeDirective");
+	removeDirectives();
 }
 
 
@@ -360,8 +434,8 @@ declare pctSpaceUsed
 declare pctInodesUsed
 
 
-pctSpaceUsed=$(df --output=pcent $fsName| tail -n -1 | sed -r -e 's/[ %]//g')
-pctInodesUsed=$(df --output=ipcent $fsName| tail -n -1 | sed -r -e 's/[ %]//g')
+pctSpaceUsed=$(/bin/df --output=pcent $fsName| /usr/bin/tail -n -1 | /bin/sed -r -e 's/[ %]//g')
+pctInodesUsed=$(/bin/df --output=ipcent $fsName| /usr/bin/tail -n -1 | /bin/sed -r -e 's/[ %]//g')
 
 declare retval=1;
 
@@ -376,8 +450,4 @@ if [[ $pctInodesUsed -gt $maxAllowedPctInodesUsed ]]; then
 fi
 
 exit $retval
-
-
-
-
 
