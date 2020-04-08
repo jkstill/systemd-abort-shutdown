@@ -160,21 +160,21 @@ chmod 664 /etc/systemd/system/bootpart-full-abort-shutdown.service
 
 systemctl enable bootpart-full-abort-shutdown.servic
 
-### /etc/systemd/system/start-bootpart-full-abort-shutdown.service
+### /etc/systemd/system/set-reboot-abort.service
 
 ```text
 [Unit]
 Description=Start /boot partition full protection - cannot reboot if disk is full
 
 [Service]
-ExecStart=/bin/sh -c '/bin/systemctl enable bootpart-full-abort-shutdown; /bin/systemctl start bootpart-full-abort-shutdown'
+ExecStart=/root/bin/reboot-abort.pl --reject
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```text
-chmod 664 /etc/systemd/system/start-bootpart-full-abort-shutdown.service
+chmod 664 /etc/systemd/system/bootpart-full-abort-shutdown.service
 ```
 
 
