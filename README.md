@@ -1,4 +1,6 @@
 
+# Reboot Protection
+
 What happens if you try to reboot a linux server when the /boot partition is full?
 
 The server will not boot, as there is a need for some free space when Linux boots.
@@ -20,13 +22,17 @@ The solution provided here will prevent the following commands from working at a
 
 - reboot
 - shutdown now
-- shutdown +0
+- shutdown +N
 
-As you will see, other forms of the shutdown command will succeed, provided the service (as you will soon see) allows it
+When the `reboot-abort.pl` script is installed and configured, the following are the only methods to reboot from the command line:
+
+- via `reboot-abort.pl --command [reboot|halt|shutdown]` 
+- disable protection via `reboot-abort.pl --allow`
+- remove protection vai `reboot-abort.pl --erase`
 
 This article is useful for RedHat Linux 7+ and variants, such as Oracle Linux.
 
-Using the systemctl utility I created a servvices that prevents a reboot or shutdown if the /boot filesystem is using more then 15% of available space.
+Using the systemctl utility I created a service that prevents a reboot or shutdown if the /boot filesystem is using more then 15% of available space.
 The 15% was chosen just to see the utility work, as /boot on this test box is 22% used.
 
 The same applies to inodes; if more than 15% of inodes are used, a reboot is not possible until the protector service is disabled.
@@ -34,414 +40,271 @@ The same applies to inodes; if more than 15% of inodes are used, a reboot is not
 When this method is used, `reboot`,  `shutdown +0` and `shutdown` now will not work at all.
 
 ```text
-[root@ora75-mule system]# reboot
-Failed to start reboot.target: Transaction contains conflicting jobs 'start' and 'stop' for systemd-reboot.service. Probably contradicting requirement dependencies configured.
+
+[root@ora75-mule ~]# reboot
+Failed to start reboot.target: Operation refused, unit reboot.target may be requested by dependency only (it is configured to refuse manual start/stop).
 See system logs and 'systemctl status reboot.target' for details.
 
-Broadcast message from root@ora75-mule.jks.com on pts/1 (Mon 2020-04-06 19:02:51 EDT):
+Broadcast message from root@ora75-mule.jks.com on pts/1 (Wed 2020-04-08 19:42:20 EDT):
 
 The system is going down for reboot NOW!
 
-[root@ora75-mule system]#
-[root@ora75-mule system]# shutdown now
-Failed to start poweroff.target: Transaction contains conflicting jobs 'stop' and 'start' for systemd-poweroff.service. Probably contradicting requirement dependencies configured.
+[root@ora75-mule ~]#
+[root@ora75-mule ~]# shutdown now
+Failed to start poweroff.target: Operation refused, unit poweroff.target may be requested by dependency only (it is configured to refuse manual start/stop).
 See system logs and 'systemctl status poweroff.target' for details.
 
-Broadcast message from root@ora75-mule.jks.com on pts/1 (Mon 2020-04-06 19:02:58 EDT):
+Broadcast message from root@ora75-mule.jks.com on pts/1 (Wed 2020-04-08 19:42:24 EDT):
 
 The system is going down for power-off NOW!
 
-[root@ora75-mule system]#
-[root@ora75-mule system]# shutdown +0
-Shutdown scheduled for Mon 2020-04-06 19:03:04 EDT, use 'shutdown -c' to cancel.
-[root@ora75-mule system]#
-Broadcast message from root@ora75-mule.jks.com (Mon 2020-04-06 19:03:04 EDT):
+[root@ora75-mule ~]# tail -0f /var/log/messages
 
-The system is going down for power-off NOW!
+Broadcast message from root@ora75-mule.jks.com (Wed 2020-04-08 19:43:28 EDT):
+
+system patching
+
+Apr  8 19:43:28 ora75-mule systemd-shutdownd: Failed to start poweroff.target: Operation refused, unit poweroff.target may be requested by dependency only (it is configured to refuse manual start/stop).
+Apr  8 19:43:28 ora75-mule systemd-shutdownd: See system logs and 'systemctl status poweroff.target' for details.
+
+
 ```
 
-Actually, these commands do not do what I intended.  
+## Preventing Reboots
 
-The intent was to detect the space usage in `/boot`, and then deny the reboot if there is insuffient space in `/boot`.
-
-This does force the use of the command `shutdown +N` and its variants.
-
-When the shutdown is attempted this way, the service will prevent it if the space is too low:
+The following files can be used to prevent a reboot:
 
 ```text
-[root@ora75-mule system]# shutdown -r +1 "Rebooting for Test"
-Shutdown scheduled for Mon 2020-04-06 19:07:26 EDT, use 'shutdown -c' to cancel.
-[root@ora75-mule system]#
-Broadcast message from root@ora75-mule.jks.com (Mon 2020-04-06 19:06:26 EDT):
-
-Rebooting for Test
-The system is going down for reboot at Mon 2020-04-06 19:07:26 EDT!
-
-
-Broadcast message from root@ora75-mule.jks.com (Mon 2020-04-06 19:06:27 EDT):
-
-The system shutdown has been cancelled at Mon 2020-04-06 19:07:27 EDT!
-
-
-Broadcast message from root@ora75-mule.jks.com (Mon Apr  6 19:06:27 2020):
-
-Space of 22% in /boot is insufficient for reboot
+[root@ora75-mule ~]# ls -l /run/systemd/system/*/reboot-abort.conf
+-rw-r--r-- 1 root root 29 Apr  8 19:34 /run/systemd/system/halt.target.d/reboot-abort.conf
+-rw-r--r-- 1 root root 29 Apr  8 19:34 /run/systemd/system/poweroff.target.d/reboot-abort.conf
+-rw-r--r-- 1 root root 29 Apr  8 19:34 /run/systemd/system/reboot.target.d/reboot-abort.conf
 ```
 
-And so the reboot was cancelled.
-
-The reboot can be forced by disabling the service:
+The contents of each file:
 
 ```text
-[root@ora75-mule system]# systemctl disable  bootpart-full-abort-shutdown.service
-Removed symlink /etc/systemd/system/shutdown.target.requires/bootpart-full-abort-shutdown.service.
-Removed symlink /etc/systemd/system/reboot.target.requires/bootpart-full-abort-shutdown.service.
-
-[root@ora75-mule system]# reboot
-PolicyKit daemon disconnected from the bus.
-We are no longer a registered authentication agent.
-Connection to 192.168.1.191 closed by remote host.
-Connection to 192.168.1.191 closed.
+[Unit]
+RefuseManualStart=yes
 ```
 
-When the system restarts, there is another service that will enable and start `bootpart-full-abort-shutdown.service`
+Commands used to reboot the sytem will fail when these file are present and the contents are `RefuseManualStart=yes`.
 
-Following the reboot I can see that the service is running, even though I disabled it to allow the reboot.
+## How to Reboot
+
+The `reboot-abort.pl` script can be used to reboot the server when needed.
+
+The file `/root/.reboot-abort/checks.conf` contains commands that are used to qualify if a reboot will be performed.
+
+These are the contents when initially installed:
 
 ```text
-[root@ora75-mule system]# systemctl status  bootpart-full-abort-shutdown.service
-● bootpart-full-abort-shutdown.service - Cancel shutdowns and reboots when /boot has insufficient free space
-   Loaded: loaded (/etc/systemd/system/bootpart-full-abort-shutdown.service; enabled; vendor preset: disabled)
-   Active: active (running) since Mon 2020-04-06 19:07:52 EDT; 59s ago
- Main PID: 835 (bash)
-   CGroup: /system.slice/bootpart-full-abort-shutdown.service
-           ├─ 835 bash /usr/local/bin/check-boot-space.sh
-           └─1797 sleep 5
+[root@ora75-mule ~]# cat ~/.reboot-abort/checks.conf
+check:/bin/true
+check:/bin/false
+check:/root/bin/check-boot-space.sh
+```
 
-Apr 06 19:07:53 ora75-mule.jks.com systemd[1]: Started Cancel shutdowns and reboots when /boot has insufficient free space.
-Apr 06 19:07:53 ora75-mule.jks.com systemd[1]: Starting Cancel shutdowns and reboots when /boot has insufficient free space...
+The premise is simple: each check is run and either fails or succeeds.
 
+If any one of the check programs fails, the attemtp to reboot will be aborted.
+
+As is, the checks file contains `/bin/false`, and so a reboot will never succeed.
+
+Both the `false` and the `true` entries can be commented out:
+
+```text
+[root@ora75-mule ~]# cat ~/.reboot-abort/checks.conf
+#check:/bin/true
+#check:/bin/false
+check:/root/bin/check-boot-space.sh
+```
+
+The `/root/bin/check-boot-space.sh` script by default fails if the space or inodes are GT 85% capacity in `/boot`.
+
+For testing, these have been changed to 15%.
+
+Now a reboot will be prevented:
+
+```text
+[root@ora75-mule ~]# reboot-abort.pl --command reboot
+current check: /root/bin/check-boot-space.sh
+Check returned negative result
+cannot reboot
+
+```
+
+Here the value is set back to 85%, and the reboot succeeds:
+
+```text
+[root@ora75-mule ~]# reboot-abort.pl --command reboot
+Connection to 192.168.1.220 closed by remote host.
+Connection to 192.168.1.220 closed.
+
+```
+
+So that the reboot can take place, `reboot-abort.pl` disables the protection.
+
+The `set-reboot-abort.service` is resonsible for resetting it when the server boots.
+
+This can be checked following a reboot:
+
+```text
+
+[root@ora75-mule ~]# systemctl status set-reboot-abort.service
+● set-reboot-abort.service - Start /boot partition full protection - cannot reboot if disk is full
+   Loaded: loaded (/etc/systemd/system/set-reboot-abort.service; enabled; vendor preset: disabled)
+   Active: inactive (dead) since Wed 2020-04-08 19:58:28 EDT; 16s ago
+  Process: 716 ExecStart=/root/bin/reboot-abort.pl --reject (code=exited, status=0/SUCCESS)
+ Main PID: 716 (code=exited, status=0/SUCCESS)
+
+Apr 08 19:58:27 ora75-mule.jks.com systemd[1]: Started Start /boot partition full protection - cannot reboot if disk is full.
+Apr 08 19:58:27 ora75-mule.jks.com systemd[1]: Starting Start /boot partition full protection - cannot reboot if disk is full...
+
+
+[root@ora75-mule ~]# cat /run/systemd/system/*/reboot-abort.conf
+[Unit]
+RefuseManualStart=yes
+[Unit]
+RefuseManualStart=yes
+[Unit]
+RefuseManualStart=yes
+```
+
+## Installing reboot-abort.pl
+
+- Login as root
+- mkdir /root/bin
+- copy reboot-abort.pl to /root/bin
+- chmod 750 /root/bin/reboot-abort.pl
+- reboot-abort.pl --install
+- reboot-abort.pl --reject
+
+Verify the installation
+
+- ls -l /run/systemd/system/*/reboot-abort.conf
+- cat /run/systemd/system/*/reboot-abort.conf
+- systemctl status set-reboot-abort.service
+- cat /root/.reboot-abort/checks.conf
+
+If any files already exist, the installer will not overwrite them.
+
+```text
+[root@ora75-mule ~]# reboot-abort.pl --install
+cowardly refusing to overwrite: /root/bin/check-boot-space.sh
+cowardly refusing to overwrite: /root/.reboot-abort/checks.conf
+cowardly refusing to overwrite: /etc/systemd/system/set-reboot-abort.service
+```
+
+## Disable reboot protection
+
+Reboot protection can be disabled with the `--allow` option.
+
+In the following example the reboot protection is disabled, and the server rebooted.
+
+The protection was reinstated during the boot process.
+
+```text
+
+[root@ora75-mule ~]# cat /run/systemd/system/*/reboot-abort.conf
+[Unit]
+RefuseManualStart=yes
+[Unit]
+RefuseManualStart=yes
+[Unit]
+RefuseManualStart=yes
+
+[root@ora75-mule ~]# reboot-abort.pl --allow
+
+[root@ora75-mule ~]# cat /run/systemd/system/*/reboot-abort.conf
+[Unit]
+RefuseManualStart=no
+[Unit]
+RefuseManualStart=no
+[Unit]
+RefuseManualStart=no
+
+
+[root@ora75-mule ~]# reboot
+Connection to 192.168.1.220 closed by remote host.
+Connection to 192.168.1.220 closed.
+jkstill@poirot  ~/linux/systemd-abort-shutdown $
+>
+
+jkstill@poirot  ~/linux/systemd-abort-shutdown $
+>  ssh root@192.168.1.220
+Last login: Wed Apr  8 19:58:39 2020 from poirot.jks.com
+[root@ora75-mule ~]#
+[root@ora75-mule ~]#
+[root@ora75-mule ~]# cat /run/systemd/system/*/reboot-abort.conf
+[Unit]
+RefuseManualStart=yes
+[Unit]
+RefuseManualStart=yes
+[Unit]
+RefuseManualStart=yes
+
+```
+
+The reboot, shutdown and halt commands will not be prevented in this state.
+
+## Re-enable reboot protection
+
+```
+[root@ora75-mule ~]# cat /run/systemd/system/*/reboot-abort.conf
+[Unit]
+RefuseManualStart=no
+[Unit]
+RefuseManualStart=no
+[Unit]
+RefuseManualStart=no
+
+[root@ora75-mule ~]# reboot-abort.pl --reject
+
+[root@ora75-mule ~]# cat /run/systemd/system/*/reboot-abort.conf
+[Unit]
+RefuseManualStart=yes
+[Unit]
+RefuseManualStart=yes
+[Unit]
+RefuseManualStart=yes
 ```
 
 ## Files
 
+### /root/bin/reboot-abort.pl
+
+The script that drives the reboot protection.
+
+!! Put help here
+
+
 Create the following files, set the permissions as noted, and follow any other instructions shown.
 
-### /usr/local/bin/check-boot-space.sh
+### /root/bin/check-boot-space.sh
+
+This file exists in the repo, but it is not necessary to copy it, as `reboot-abort.pl` will install it automatically.
+
+### /root/.reboot-abort/checks.conf
+
+The configuration file for checks that may disallow a reboot.
 
 
-```bash
-#!/usr/bin/env bash
+### /etc/systemd/system/set-reboot-abort.service
 
+This file is created by `reboot-abort.pl --install`
 
-: << 'SHUTDOWN-STATUS'
-
-As an alternative to checking for shutdown status file, look at 'Status' in systemd-shutdownd.service
-
-Shutting Down:
-
-   [root@ora75-mule ~]# shutdown -r +5
-   Shutdown scheduled for Mon 2020-04-06 15:21:33 EDT, use 'shutdown -c' to cancel.
-   [root@ora75-mule ~]#
-   Broadcast message from root@ora75-mule.jks.com (Mon 2020-04-06 15:16:33 EDT):
-   
-   The system is going down for reboot at Mon 2020-04-06 15:21:33 EDT!
-   
-   [root@ora75-mule ~]# systemctl status systemd-shutdownd.service
-    systemd-shutdownd.service - Delayed Shutdown Service
-      Loaded: loaded (/usr/lib/systemd/system/systemd-shutdownd.service; static; vendor preset: disabled)
-      Active: active (running) since Mon 2020-04-06 15:16:33 EDT; 3s ago
-        Docs: man:systemd-shutdownd.service(8)
-    Main PID: 13712 (systemd-shutdow)
-      Status: "Shutting down at Mon 2020-04-06 15:21:33 EDT (reboot)..."
-      CGroup: /system.slice/systemd-shutdownd.service
-              └─13712 /usr/lib/systemd/systemd-shutdownd
-   
-   Apr 06 15:16:33 ora75-mule.jks.com systemd[1]: Started Delayed Shutdown Service.
-   Apr 06 15:16:33 ora75-mule.jks.com systemd[1]: Starting Delayed Shutdown Service...
-   Apr 06 15:16:33 ora75-mule.jks.com systemd-shutdownd[13712]: Shutting down at Mon 2020-04-06 15:21:33 EDT (reboot)...
-   Apr 06 15:16:33 ora75-mule.jks.com systemd-shutdownd[13712]: Creating /run/nologin, blocking further logins...
-   
-When not shutting down
-
-   [root@ora75-mule ~]# systemctl status systemd-shutdownd.service
-    systemd-shutdownd.service - Delayed Shutdown Service
-      Loaded: loaded (/usr/lib/systemd/system/systemd-shutdownd.service; static; vendor preset: disabled)
-      Active: inactive (dead) since Mon 2020-04-06 15:16:46 EDT; 1min 18s ago
-        Docs: man:systemd-shutdownd.service(8)
-     Process: 13712 ExecStart=/usr/lib/systemd/systemd-shutdownd (code=exited, status=0/SUCCESS)
-    Main PID: 13712 (code=exited, status=0/SUCCESS)
-      Status: "Exiting..."
-   
-   Apr 06 15:16:33 ora75-mule.jks.com systemd[1]: Started Delayed Shutdown Service.
-   Apr 06 15:16:33 ora75-mule.jks.com systemd[1]: Starting Delayed Shutdown Service...
-   Apr 06 15:16:33 ora75-mule.jks.com systemd-shutdownd[13712]: Shutting down at Mon 2020-04-06 15:21:33 EDT (reboot)...
-   Apr 06 15:16:33 ora75-mule.jks.com systemd-shutdownd[13712]: Creating /run/nologin, blocking further logins...
-
-
-SHUTDOWN-STATUS
-
-declare shutdownSchedulerFile=/run/systemd/shutdown/scheduled
-
-declare shutdownCmd=/usr/sbin/shutdown
-declare abortShutdownCmd="$shutdownCmd -c"
-
-declare systemctlCmd=/bin/systemctl
-declare serviceDisableCmd="$systemctlCmd disable "
-declare serviceStopCmd="$systemctlCmd stop "
-declare bootGuardService=bootpart-full-abort-shutdown.service
-
-declare fsName='/boot'
-
-declare maxAllowedPctSpaceUsed=85
-declare maxAllowedPctInodesUsed=85
-
-declare pctSpaceUsed
-declare pctInodesUsed
-
-declare logfile=/tmp/bootguard.log
-
-while :
-do
-
-	if [[ -e $shutdownSchedulerFile ]]; then
-
-		pctSpaceUsed=$(df --output=pcent $fsName| tail -n -1 | sed -r -e 's/[ %]//g')
-		pctInodesUsed=$(df --output=ipcent $fsName| tail -n -1 | sed -r -e 's/[ %]//g')
-
-		declare stopTheService='no'
-
-		if [[ $pctSpaceUsed -gt $maxAllowedPctSpaceUsed ]]; then
-			eval $abortShutdownCmd
-			wall "Space of ${pctSpaceUsed}% in $fsName is insufficient for reboot"
-			logger "Space of ${pctSpaceUsed}% in $fsName is insufficient for reboot"
-		else
-			declare stopTheService='yes'
-		fi
-
-		if [[ $pctInodesUsed -gt $maxAllowedPctInodesUsed ]]; then
-			eval $abortShutdownCmd
-			wall "Inodes of ${pctInodesUsed}% in $fsName is insufficient for reboot"
-			logger "Inodes of ${pctInodesUsed}% in $fsName is insufficient for reboot"
-		else
-			declare stopTheService='yes'
-		fi
-
-		if [[ $stopTheService == 'yes' ]]; then
-			# disable the boot guard so that reboot will succeeed
-			eval $serviceStopCmd $bootGuardService
-			# for some reason a slight pause is needed here when running as a service
-			sleep 2
-			eval $serviceDisableCmd $bootGuardService
-			exit
-		fi
-
-	fi
-
-	sleep 5
-
-done
-
-```
-
-```text
-chmod 760 /usr/local/bin/check-boot-space.sh
-```
-
-
-### /etc/systemd/system/bootpart-full-abort-shutdown.service
-
-```text
-[Unit]
-Description=Cancel shutdowns and reboots when /boot has insufficient free space
-Requires=multi-user.target
-Before=shutdown.target reboot.target
-
-[Service]
-Type=simple
-Restart=always
-RestartSec=1
-ExecStart=/usr/local/bin/check-boot-space.sh
-TimeoutStartSec=10
-
-[Install]
-RequiredBy=shutdown.target reboot.target
-```
-
-```text
-chmod 664 /etc/systemd/system/bootpart-full-abort-shutdown.service
-```
-
-systemctl enable bootpart-full-abort-shutdown.servic
-
-### /etc/systemd/system/start-bootpart-full-abort-shutdown.service
 
 ```text
 [Unit]
 Description=Start /boot partition full protection - cannot reboot if disk is full
 
 [Service]
-ExecStart=/bin/sh -c '/bin/systemctl enable bootpart-full-abort-shutdown; /bin/systemctl start bootpart-full-abort-shutdown'
+ExecStart=/root/bin/reboot-abort.pl --reject
 
 [Install]
 WantedBy=multi-user.target
 ```
-
-```text
-chmod 664 /etc/systemd/system/start-bootpart-full-abort-shutdown.service
-```
-
-
-## Enable and Start the service
-
-```text
-[root@ora75-mule ~]# systemctl status bootpart-full-abort-shutdown.service
-● bootpart-full-abort-shutdown.service - Cancel shutdowns and reboots when /boot has insufficient free space
-   Loaded: loaded (/etc/systemd/system/bootpart-full-abort-shutdown.service; disabled; vendor preset: disabled)
-	Active: inactive (dead)
-
-[root@ora75-mule ~]# systemctl enable bootpart-full-abort-shutdown.service
-Created symlink from /etc/systemd/system/poweroff.target.wants/bootpart-full-abort-shutdown.service to /etc/systemd/system/bootpart-full-abort-shutdown.service.
-Created symlink from /etc/systemd/system/halt.target.wants/bootpart-full-abort-shutdown.service to /etc/systemd/system/bootpart-full-abort-shutdown.service.
-
-[root@ora75-mule ~]# systemctl start  bootpart-full-abort-shutdown.service
-
-[root@ora75-mule ~]# systemctl status  bootpart-full-abort-shutdown.service
-● bootpart-full-abort-shutdown.service - Cancel shutdowns and reboots when /boot has insufficient free space
-   Loaded: loaded (/etc/systemd/system/bootpart-full-abort-shutdown.service; enabled; vendor preset: disabled)
-   Active: active (running) since Mon 2020-04-06 20:59:58 EDT; 2s ago
- Main PID: 4194 (bash)
-   CGroup: /system.slice/bootpart-full-abort-shutdown.service
-           ├─4194 bash /usr/local/bin/check-boot-space.sh
-           └─4195 sleep 5
-
-Apr 06 20:59:58 ora75-mule.jks.com systemd[1]: Started Cancel shutdowns and reboots when /boot has insufficient free space.
-Apr 06 20:59:58 ora75-mule.jks.com systemd[1]: Starting Cancel shutdowns and reboots when /boot has insufficient free space...
-
-```
-
-## Show Dependencies
-
-These dependencies will be removed when `check-boot-space.sh` allows a reboot.
-
-When the server restarts, the dependencies will be put back in place by the `start-bootpart-full-abort-shutdown.service` service.
-
-```text
-[root@ora75-mule ~]# systemctl list-dependencies reboot.target
-reboot.target
-● ├─bootpart-full-abort-shutdown.service
-● ├─plymouth-reboot.service
-● ├─systemd-reboot.service
-● └─systemd-update-utmp-runlevel.service
-
-
-[root@ora75-mule ~]# systemctl list-dependencies shutdown.target
-shutdown.target
-● ├─bootpart-full-abort-shutdown.service
-● └─dracut-shutdown.service
-```
-
-## Test the service
-
-With the threshold values at 15%, the `check-boot-space.sh` script that is run by the `bootpart-full-abort-shutdown.service` service will prevent the reboot.
-
-```
-[root@ora75-mule ~]# grep 'declare max' /usr/local/bin/check-boot-space.sh
-declare maxAllowedPctSpaceUsed=15
-declare maxAllowedPctInodesUsed=15
-
-
-[root@ora75-mule ~]# shutdown -r +1 "Rebooting for Test"
-Shutdown scheduled for Mon 2020-04-06 20:22:12 EDT, use 'shutdown -c' to cancel.
-
-Broadcast message from root@ora75-mule.jks.com (Mon 2020-04-06 20:21:12 EDT):
-
-Rebooting for Test
-The system is going down for reboot at Mon 2020-04-06 20:22:12 EDT!
-
-[root@ora75-mule ~]#
-Broadcast message from root@ora75-mule.jks.com (Mon 2020-04-06 20:21:12 EDT):
-
-The system shutdown has been cancelled at Mon 2020-04-06 20:22:12 EDT!
-
-
-Broadcast message from root@ora75-mule.jks.com (Mon Apr  6 20:21:12 2020):
-
-Space of 22% in /boot is insufficient for reboot
-
-```
-
-When changed back to 85, the reboot will proceed:
-
-```text
-
-[root@ora75-mule ~]# systemctl stop  bootpart-full-abort-shutdown.service
-
-[root@ora75-mule ~]# systemctl disable  bootpart-full-abort-shutdown.service
-Removed symlink /etc/systemd/system/shutdown.target.requires/bootpart-full-abort-shutdown.service.
-Removed symlink /etc/systemd/system/reboot.target.requires/bootpart-full-abort-shutdown.service.
-
-[root@ora75-mule ~]# systemctl daemon-reload
-
-[root@ora75-mule ~]# systemctl start  bootpart-full-abort-shutdown.service
-
-[root@ora75-mule ~]# grep 'declare max' /usr/local/bin/check-boot-space.sh
-declare maxAllowedPctSpaceUsed=85
-declare maxAllowedPctInodesUsed=85
-
-ot@ora75-mule ~]# shutdown -r +1 "Rebooting for Test"
-Shutdown scheduled for Mon 2020-04-06 20:25:43 EDT, use 'shutdown -c' to cancel.
-
-Broadcast message from root@ora75-mule.jks.com (Mon 2020-04-06 20:24:43 EDT):
-
-Rebooting for Test
-The system is going down for reboot at Mon 2020-04-06 20:25:43 EDT!
-
-
-[root@ora75-mule ~]# systemctl list-dependencies shutdown.target
-shutdown.target
-● └─dracut-shutdown.service
-
-
-[root@ora75-mule ~]# Connection to 192.168.1.191 closed by remote host.
-Connection to 192.168.1.191 closed.
-
-```
-
-The `systemctl list-dependencies shutdown.target` command shows that `bootpart-full-abort-shutdown.service` was removed as a dependency.
-
-If not removed, the reboot will fail, and you will see a message like this in `/var/log/messages` :
-
-```text
-systemd: Requested transaction contains unmergeable jobs: Transaction contains conflicting jobs 'stop' and 'start' for systemd-poweroff.service. Probably contradicting requirement dependencies configured.
-```
-
-So far I have been unable to find how to resolve that error.
-
-When I know how to resolve that error, there will be no need to disable the boot guard service. Until then however, this is how it works.
-
-Log back on to the server and verify that the service restarted:
-
-```text
-[root@ora75-mule ~]# systemctl status  bootpart-full-abort-shutdown.service
-● bootpart-full-abort-shutdown.service - Cancel shutdowns and reboots when /boot has insufficient free space
-   Loaded: loaded (/etc/systemd/system/bootpart-full-abort-shutdown.service; enabled; vendor preset: disabled)
-   Active: active (running) since Mon 2020-04-06 20:25:39 EDT; 3min 14s ago
- Main PID: 836 (bash)
-   CGroup: /system.slice/bootpart-full-abort-shutdown.service
-           ├─ 836 bash /usr/local/bin/check-boot-space.sh
-           └─1966 sleep 5
-
-Apr 06 20:25:39 ora75-mule.jks.com systemd[1]: Started Cancel shutdowns and reboots when /boot has insufficient free space.
-Apr 06 20:25:39 ora75-mule.jks.com systemd[1]: Starting Cancel shutdowns and reboots when /boot has insufficient free space...
-
-
-[root@ora75-mule ~]# systemctl list-dependencies shutdown.target
-shutdown.target
-● ├─bootpart-full-abort-shutdown.service
-● └─dracut-shutdown.service
-```
-
 
 ## References
 
