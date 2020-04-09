@@ -2,8 +2,8 @@
 
 declare fsName='/boot'
 
-declare maxAllowedPctSpaceUsed=15
-declare maxAllowedPctInodesUsed=15
+declare maxAllowedPctSpaceUsed=85
+declare maxAllowedPctInodesUsed=85
 
 declare pctSpaceUsed
 declare pctInodesUsed
