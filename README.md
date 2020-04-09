@@ -11,7 +11,7 @@ Here's one way to deal with that; create a service that will abort a shutdown if
 
 In this case the conditions are:
 
-- insuffcient space /boot 
+- insufficient space /boot 
 - insufficient inodes in /boot
 
 If /boot is full, a reboot will fail, as there must be some free space in /boot.
@@ -276,8 +276,44 @@ RefuseManualStart=yes
 
 The script that drives the reboot protection.
 
-!! Put help here
+```text
 
+Usage:
+        reboot-abort.pl --reject
+
+Options:
+    -r | --reject
+         Do not allow reboots directly via reboot, shutdonw or halt.
+
+    -a | --allow
+         Allow reboots directly via reboot, shutdonw or halt.
+
+    -i | --install
+         Install the reboot-abort.files and service.
+
+    -e | --erase
+         Remove the reboot-abort.files and service.
+
+    -d | --debug
+         Prints messages on stdout
+
+    -h | --help
+         Print options help
+
+    -m | --man
+         Print extended help
+
+    -c | --cmd | --command
+         Issue a command to restart the server.
+
+         The command will  fail to execute if:
+
+         - the command does not start with shutdown|reboot|halt
+         - more than 1 command is issued
+         - one of the check scripts from ~/.reboot-abort/checks.conf returns false
+
+
+```
 
 Create the following files, set the permissions as noted, and follow any other instructions shown.
 
