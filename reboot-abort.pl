@@ -15,6 +15,7 @@ use warnings;
 use Getopt::Long;
 use File::Path qw(make_path);
 use IO::File;
+use Pod::Usage;
 
 eval {
 	require Data::Dumper;
@@ -114,7 +115,8 @@ GetOptions (
 	"i|install!" => \$installReboot,
 	"e|erase!" => \$eraseReboot,
 	"d|debug!" => \$debug,
-	"h|help!" => \$help,
+	"h|help!" => sub { pod2usage( -verbose => 1 ) },
+	"m|man!" => sub { pod2usage( -verbose => 2 ) },
 	"c|cmd|command=s" => \$rebootCmd,
 ) or die usage(1);
 
@@ -421,6 +423,80 @@ sub remove {
 	removeDirectives();
 }
 
+
+=head1 NAME
+
+F<reboot-abort.pl>
+
+=head1 VERSION
+
+Version 0.1
+
+=head1 DESCRIPTION
+
+Control Linux Reboots and Shutdowns
+
+=head1 SYNOPSIS
+
+    reboot-abort.pl --reject
+
+=head1 OPTIONS
+
+=over
+
+=item -r | --reject
+
+ Do not allow reboots directly via reboot, shutdonw or halt.
+
+=item -a | --allow
+
+ Allow reboots directly via reboot, shutdonw or halt.
+
+=item -i | --install
+
+ Install the reboot-abort.files and service.
+
+=item -e | --erase
+
+ Remove the reboot-abort.files and service.
+
+=item -d | --debug
+
+ Prints messages on stdout
+
+=item -h | --help
+
+ Print options help
+
+=item -m | --man
+
+ Print extended help
+
+=item -c | --cmd | --command
+
+ Issue a command to restart the server.
+
+ The command will  fail to execute if:
+
+ - the command does not start with shutdown|reboot|halt
+ - more than 1 command is issued
+ - one of the check scripts from ~/.reboot-abort/checks.conf returns false
+
+=back
+
+=head1 CHANGE HISTORY
+
+=head2 2020-04-08: Jared Still
+
+Script creation.
+
+=head1 AUTHOR
+
+Jared Still, <still@pythian.com> <jkstill@gmail.com>
+
+=cut
+
+# end of program
 
 __DATA__
 #!/usr/bin/env bash
