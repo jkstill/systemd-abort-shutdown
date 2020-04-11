@@ -115,6 +115,7 @@ GetOptions (
 	"i|install!" => \$installReboot,
 	"e|erase!" => \$eraseReboot,
 	"d|debug!" => \$debug,
+	"s|status!" => sub { status() },
 	"h|help!" => sub { pod2usage( -verbose => 1 ) },
 	"m|man!" => sub { pod2usage( -verbose => 2 ) },
 	"c|cmd|command=s" => \$rebootCmd,
@@ -195,6 +196,36 @@ sub createDirs {
 			make_path($dir);
 		};
 		if ( $@ ) { die "could not create $dir\n" }
+	}
+}
+
+
+sub status {
+	print "\n";
+	print "\n########### Service Status #####################\n";
+	statusService();
+	print "\n########### Reboot Directives ##################\n";
+	showDirectives();
+	print "\n";
+	exit;
+}
+
+
+sub showDirectives {
+	pdebug("inside showDirective()");
+	pdebug( '@runDirs: ', Dumper(\@runDirs));
+	foreach my $dir ( @runDirs ) {
+		my $fh = IO::File->new;
+		my $inFile="${dir}/${runFile}";
+		pdebug("inFile $inFile");
+		local $/; # file slurp mode
+		if ( ! $fh->open($inFile,'<') ) {
+			print "could not open $inFile - $!\n";
+			next;
+		}
+		print "$inFile: \n";
+		print <$fh>,"\n";
+		close $fh;
 	}
 }
 
@@ -307,7 +338,7 @@ sub validateCmd {
 
 sub usage {
 
-	print "stub for usage\n";
+	pod2usage( -verbose => 1 );
 
 	return;
 
@@ -325,6 +356,10 @@ sub checkUsers {
 }
 
 
+sub statusService {
+	system("/usr/bin/systemctl status $service{name}"); # or die "failed to start service $service{name} - $!\n";
+	return;
+}
 
 sub createService {
 
