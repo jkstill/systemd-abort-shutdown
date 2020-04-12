@@ -28,9 +28,12 @@ if ($@) { sub Dumper{} }
 
 my $rejectReboot=0;
 my $allowReboot=0;
+my $disableReboot=0;
+my $enableReboot=0;
 my $rebootCmd='';
 my $help=0;
 my $debug=0;
+my $quiet=0;
 my $installReboot=0;
 my $eraseReboot=0;
 my @allowedUsers = qw[ root ];
@@ -115,7 +118,10 @@ GetOptions (
 	"i|install!" => \$installReboot,
 	"e|erase!" => \$eraseReboot,
 	"d|debug!" => \$debug,
-	"s|status!" => sub { status() },
+	"q|quiet!" => \$quiet,
+	"s|status!" => sub { status(); exit; },
+	"n|enable!" => \$enableReboot,
+	"b|disable!" => \$disableReboot,
 	"h|help!" => sub { pod2usage( -verbose => 1 ) },
 	"m|man!" => sub { pod2usage( -verbose => 2 ) },
 	"c|cmd|command=s" => \$rebootCmd,
@@ -156,10 +162,22 @@ if ($rebootCmd and ! validateCmd("$rebootCmd") ) {
 
 if ($allowReboot) {
 	 pdebug("configuring to allow reboot");
-	allow();
+	allowReboot();
+	status() unless $quiet;
 	exit;
 } elsif ($rejectReboot) {
-	reject();
+	rejectReboot();
+	status() unless $quiet;
+	exit;
+} elsif ($disableReboot) {
+	disableService();
+	allowReboot();
+	status();
+	exit;
+} elsif ($enableReboot) {
+	enableReboot();
+	rejectReboot();
+	status();
 	exit;
 } elsif ($rebootCmd) {
 	my @checks=getChecks($fpConfigFile);
@@ -168,13 +186,15 @@ if ($allowReboot) {
 	exit;
 } elsif ($installReboot) {
 	install();
+	status() unless $quiet;
 	exit;
 } elsif ($eraseReboot) {
 	remove();
+	status() unless $quiet;
 	exit;
 } else {
 	print "Unknown State\n";
-	exit 44;
+	exit 47;
 }
 
 
@@ -199,17 +219,17 @@ sub createDirs {
 	}
 }
 
-
+# called directly from options
 sub status {
+	return if $quiet;
 	print "\n";
-	print "\n########### Service Status #####################\n";
+	print "\n########### Service Status #####################\n\n";
 	statusService();
-	print "\n########### Reboot Directives ##################\n";
+	print "\n########### Reboot Directives ##################\n\n";
 	showDirectives();
 	print "\n";
-	exit;
+	return;
 }
-
 
 sub showDirectives {
 	pdebug("inside showDirective()");
@@ -244,21 +264,36 @@ sub writeDirective {
 	}
 }
 
+sub removeFile {
+
+	my $fileToRemove = shift;
+
+	eval { unlink ($fileToRemove) };
+
+	if ($@){
+		print "$fileToRemove already removed or inaccessible\n";
+	};
+
+	return;
+
+}
+
 sub removeDirectives {
+	pdebug("inside removeDirectives\n");
 	foreach my $dir ( @runDirs ) {
 		my $filename="${dir}/${runFile}";
 		pdebug("filename $filename");
-		unlink ($filename);
+		removeFile($filename);
 	}
 }
 
-sub reject {
+sub rejectReboot {
 	createDirs();
 	writeDirective('reject');
 }
 
-sub allow {
-	pdebug("inside allow()");
+sub allowReboot {
+	pdebug("inside allowReboot()");
 	createDirs();
 	writeDirective('allow');
 }
@@ -311,7 +346,7 @@ sub reboot {
 	# allow reboot
 	# then run the command
 	
-	allow();
+	allowReboot();
 	my $cmdResults=qx/$rebootCmd/;
 
 	print "cmdResults: $cmdResults\n";
@@ -355,9 +390,45 @@ sub checkUsers {
 	};
 }
 
+sub runSystemctl {
+
+	my $cmd = join(' ', @_);
+
+	system("$cmd");
+
+	my $rc = $?;
+
+	pdebug('initial $rc: ' . $rc);
+
+	# see 'man systemctl'
+
+	if ($rc == -1) {
+		print "failed to execute: $!\n";
+	}
+
+	$rc = $rc >> 8;
+	pdebug('shifted $rc: ' . $rc);
+
+	if ($rc =~ /[01]{1}/ ) {
+		# may be enabled or disabled
+		return;
+	}
+	elsif ($rc == 3) {
+		# systemctl returns 3 for loaded/inactive
+		# this is normal for the set-reboot-abort.service service
+		# returns the same value for enabled/disabled
+		return;
+	}
+	else {
+		printf "cmd exit code: %d\n", $rc;
+	}
+
+	return;
+
+}
 
 sub statusService {
-	system("/usr/bin/systemctl status $service{name}"); # or die "failed to start service $service{name} - $!\n";
+	runSystemctl("/usr/bin/systemctl status $service{name}"); # or die "failed to start service $service{name} - $!\n";
 	return;
 }
 
@@ -376,7 +447,23 @@ sub createService {
 
 	chmod 0664, $serviceFile;
 
-	system("/usr/bin/systemctl enable $service{name}"); # or die "failed to start service $service{name} - $!\n";
+	runSystemctl("/usr/bin/systemctl enable $service{name}"); # or die "failed to start service $service{name} - $!\n";
+	return;
+}
+
+sub disableService {
+	runSystemctl("/usr/bin/systemctl disable $service{name}"); 
+	return;
+}
+
+sub enableService {
+	runSystemctl("/usr/bin/systemctl enable $service{name}"); 
+	return;
+}
+
+sub enableReboot {
+	allowReboot();
+	enableService();
 	return;
 }
 
@@ -386,8 +473,8 @@ sub removeService {
 
 	chmod 0664, $serviceFile;
 
-	system("/usr/bin/systemctl disable $service{name}"); # or die "failed to disable service $service{name} - $!\n";
-	unlink ($serviceFile);
+	disableService();
+	removeFile($serviceFile);
 	return;
 
 }
@@ -399,6 +486,7 @@ sub getCheckScript {
 		return;
 	}
 	my $fh = IO::File->new;
+
 	$fh->open($checkBootFile,'>') or die "could not create $checkBootFile - $!\n";
 	while (<DATA>) {
 		print $fh $_;
@@ -409,7 +497,7 @@ sub getCheckScript {
 
 sub removeCheckScript {
 	my $checkBootFile = "${rootBin}/${chkBootScript}";
-	unlink ($checkBootFile);
+	removeFile($checkBootFile);
 	return;
 }
 
@@ -430,7 +518,7 @@ sub createConfig {
 }
 
 sub removeConfig {
-	unlink $fpConfigFile;
+	removeFile($fpConfigFile);
 	pdebug("removeConfig: removing $fpConfigFile");
 	my $fpConfigDir=qq[${homeDir}/${configDir}];
 	rmdir $fpConfigDir;
@@ -444,6 +532,8 @@ sub install  {
 	createConfig();
 	pdebug("\ninstall: calling createService");
 	createService();
+	pdebug("\ninstall: calling allowReboot");
+	allowReboot();
 }
 
 
@@ -495,6 +585,28 @@ Control Linux Reboots and Shutdowns
 
  Remove the reboot-abort.files and service.
 
+=item -s | --status
+
+ Show status of the service used to enable reboot-abort at boot time.
+
+ Show the contents of files that allow/reject reboot attempts.
+
+=item -n | --enable
+
+ Enable the reboot-abort startup service
+ 
+ This service simply calls 'reboot-abort.pl --reject'
+
+=item -b | --disable 
+
+ Disable the reboot-abort startup service
+
+ This prevents the calling of 'reboot-abort.pl --reject' after boot
+
+=item -q | --quiet
+
+ Do not display status messages with --reject, --allow, ...
+
 =item -d | --debug
 
  Prints messages on stdout
@@ -519,11 +631,81 @@ Control Linux Reboots and Shutdowns
 
 =back
 
+=head1 How to Reboot
+
+  The default instellation prevents reboots via 'reboot', 'halt' and 'shutdown'.
+
+  The default /root/.reboot-abort/checks.conf file contains:
+
+    check:/bin/true
+    check:/bin/false
+    check:/root/bin/check-boot-space.sh
+
+  So by default, a reboot cannot be performed, as /bin/false will always prevent it
+
+    # reboot-abort.pl --command reboot
+     current check: /bin/false
+     Check returned negative result
+     cannot reboot
+  
+  Just remove or comment out (with #)  the true and false entries.
+
+  Then a reboot will work, unless of course /boot has more than 85% of space used.
+
+  The check-boot-space.sh here is preventing reboot as more than 85% space is used in /boot
+
+    # reboot-abort.pl --command reboot
+      current check: /root/bin/check-boot-space.sh
+      Check returned negative result
+      cannot reboot
+
+  
+  Any script you like can be added to /root/.reboot-abort/checks.conf
+
+  The requirements for the script are simple:
+
+  - returns 0 for success, non-zero otherwise
+  
+  The script may take arguments.  
+
+  The script /root/bin/check-boot-space.sh has the /boot filesystem hardcoded, as well as the space used threshold, but these could be passed as arguments install
+
+
+=head1 Install
+
+ Copy reboot-abort.pl to /root/bin
+
+ Run install
+
+   reboot-abort.pl --install
+
+
+ When first installed, manual reboots are still allowed
+
+ To disable reboots
+
+   reboot-abort.pl --reject
+
+ To re-enable manual reboots
+
+   reboot-abort.pl --allow
+
+=head1 Remove
+
+  - removes all files created by reboot-abort.pl
+  - disables and removes the service
+
+    reboot-abort.pl --erase
+
 =head1 CHANGE HISTORY
 
 =head2 2020-04-08: Jared Still
 
 Script creation.
+
+=head2 2020-04-12 Jared Still
+
+Added informative options
 
 =head1 AUTHOR
 
